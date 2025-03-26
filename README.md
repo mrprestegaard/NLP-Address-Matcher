@@ -1,7 +1,7 @@
 # NLP-Address-Matcher
 
-## Overview (still in testing)
-NLP-Address-Matcher is (hopefully) going to be a Python-based tool designed to standardize and parse address data efficiently. It extracts relevant components from raw, unstructured address inputs and prepares them for automated client/account matching and validation. The project leverages a combination of regex-based transformations, predefined mappings (USPS standardizations), and structured parsing techniques to improve address normalization and matching accuracy.
+## Overview (still in testing--this is not a working product yet!!)
+NLP-Address-Matcher is (hopefully) going to be a Python-based tool designed to standardize and parse address data efficiently. It extracts relevant components from raw, unstructured address inputs and prepares them for automated client matching and validation. The project leverages a combination of regex-based transformations, predefined mappings (USPS standardizations), and structured parsing techniques to improve address normalization and matching accuracy.
 
 ## Features
 - **Standardizes Address Components:** Converts common variations and abbreviations into a consistent format.
@@ -49,6 +49,9 @@ print(parsed_result)
 - **Database Cleanup:** Ensuring address consistency across structured databases.
 - **Logistics & Shipping:** Improving address validation for package delivery systems.
 - **Fraud Detection:** Enhancing identity verification by cross-referencing address data.
+
+## Dependencies
+This project makes use of the [`usaddress`](https://github.com/datamade/usaddress) package for structured address parsing. `usaddress` is a probabilistic, rule-based parser for extracting address components from unstructured text. It plays a critical role in identifying and labeling address parts accurately.
 
 ## Roadmap
 - Implement machine learning-based address normalization and entity recognition.
