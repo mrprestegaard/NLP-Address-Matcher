@@ -1,6 +1,6 @@
 pip install usaddress pandas requests
 
-# Grouped dictionaries for better organization
+# Grouped dictionaries; abbreviations
 STREET_ABBREVIATIONS = {
     "alley": "Aly", "annex": "Anx", " arcade": "Arc", "avenue": "Ave", "bayou": "Byu",
     "beach": "Bch", "bend": "Bnd", "bluff": "Blf", "boulevard": "Blvd", "branch": "Br",
@@ -52,8 +52,24 @@ ORDINAL_ABBREVIATIONS = {
     "fifth": "5th", "sixth": "6th", "seventh": "7th", "eighth": "8th", "ninth": "9th"
 }
 
-# U.S. State Abbreviations
 US_STATE_ABBREVIATIONS = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA",
+    "colorado": "CO", "connecticut": "CT", "delaware": "DE", "florida": "FL", "georgia": "GA",
+    "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA",
+    "kansas": "KS", "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV", "new hampshire": "NH",
+    "new jersey": "NJ", "new mexico": "NM", "new york": "NY", "north carolina": "NC",
+    "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR", "pennsylvania": "PA",
+    #puerto rico
+    "puerto rico": "PR",
+    "rhode island": "RI", "south carolina": "SC", "south dakota": "SD", "tennessee": "TN",
+    "texas": "TX", "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY"
+}
+
+# List of U.S. states and their abbreviations
+US_STATE_ABBREVIATIONS_2 = {
     "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA",
     "colorado": "CO", "connecticut": "CT", "delaware": "DE", "florida": "FL", "georgia": "GA",
     "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA",
@@ -64,8 +80,10 @@ US_STATE_ABBREVIATIONS = {
     "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR", "pennsylvania": "PA",
     "rhode island": "RI", "south carolina": "SC", "south dakota": "SD", "tennessee": "TN",
     "texas": "TX", "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
-    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY"
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    "puerto rico": "PR"  # Added Puerto Rico
 }
+
 
 CANADIAN_PROVINCE_ABBREVIATIONS = {
     # Alberta
@@ -124,21 +142,21 @@ CANADIAN_ABBREVIATIONS = {
     **ORDINAL_ABBREVIATIONS
 }
 
+
 import pandas as pd
 import requests
 from io import StringIO
 
-# Load CSV from GitHub
+# CSV of all US cities, states. 
 url = "https://raw.githubusercontent.com/grammakov/USA-cities-and-states/refs/heads/master/us_cities_states_counties.csv"
 response = requests.get(url)
 df = pd.read_csv(StringIO(response.text), delimiter='|')
 
-# Clean up whitespace and column names
 df.columns = [col.strip() for col in df.columns]
 df['City'] = df['City'].str.strip()
 df['State short'] = df['State short'].str.strip()
 
-# Define NYC boroughs as their own "cities"
+# Shoutout to NY for being difficult >:|
 nyc_boroughs = [
     {"City": "Manhattan", "State short": "NY", "State full": "New York", "Country": "USA"},
     {"City": "Brooklyn", "State short": "NY", "State full": "New York", "Country": "USA"},
@@ -146,22 +164,15 @@ nyc_boroughs = [
     {"City": "Bronx", "State short": "NY", "State full": "New York", "Country": "USA"},
     {"City": "Staten Island", "State short": "NY", "State full": "New York", "Country": "USA"}
 ]
-
-# Convert to DataFrame
 df_boroughs = pd.DataFrame(nyc_boroughs)
+df_city_state = pd.concat([df, df_boroughs], ignore_index=True)
 
-# Append to your city/state DataFrame
-df_city_state = pd.concat([df_city_state, df_boroughs], ignore_index=True)
-
-# Drop duplicates again in case any are already present
+# De-doop
 df_city_state = df_city_state.drop_duplicates(subset=["City", "State short"]).reset_index(drop=True)
 
-
-# Map state codes
 state_codes = {abbr: f"{i+1:02d}" for i, abbr in enumerate(sorted(df_city_state['State short'].unique()))}
 df_city_state = df_city_state.sort_values(by=['State short', 'City']).reset_index(drop=True)
-
-# Generate Smart Index
+# Generate Smart Index -> state has 2-digit identifier, concat with city 4-digit id
 smart_indices = []
 current_state = None
 counter = 0
@@ -178,6 +189,9 @@ for _, row in df_city_state.iterrows():
 
 df_city_state['Smart Index'] = smart_indices
 
+df_city_state = df_city_state[['City', 'State short', 'Country', 'Smart Index']]
+df_city_state['Country'] = 'USA'
+df_city_state = df_city_state.reset_index(drop=True)
 
 
 import re
@@ -189,6 +203,20 @@ class AddressParser:
         self.usps_abbreviations = usps_abbreviations
         self.state_abbreviations = {k.upper(): v for k, v in state_abbreviations.items()}
         self.city_state_index_df = city_state_index_df  # your df_city_state
+
+    # Define the fallback_city_state_lookup method
+    def fallback_city_state_lookup(self, tokens):
+        # Look for the last token that matches any city/state
+        city, state = None, None
+
+        # Check if any token matches city/state format from the DataFrame
+        for token in reversed(tokens):
+            state = token.upper() if token.upper() in self.state_abbreviations else state
+            city = token.title() if token.title() in self.city_state_index_df['City'].values else city
+            if state and city:
+                break
+
+        return city, state
 
     def extract_po_box(self, address):
         match = re.search(r'\bP\.?\s*O\.?\s*Box\s*\d+\b', address, re.IGNORECASE)
@@ -227,29 +255,44 @@ class AddressParser:
             return self.state_abbreviations.get(state_clean, state)
         return state
 
-    def extract_attention_marker(self, addressee_text):
-        if not isinstance(addressee_text, str):
-            return None, None
-        marker_match = re.match(r'(?i)\b(ATTN|Attention|C\/O|\u2105)\b[:\s]*', addressee_text)
-        if marker_match:
-            marker = marker_match.group(1).upper()
-            cleaned_name = re.sub(r'(?i)\b(ATTN|Attention|C\/O|\u2105)\b[:\s]*', '', addressee_text).strip()
-            return cleaned_name, marker
-        return addressee_text.strip(), None
+    def extract_attention_marker_and_clean(self, address):
+        if not isinstance(address, str):
+            return address, None
+        pattern = re.compile(r'(?i)\b(ATTN|Attention|C\/O|℅)\b[:\s]*')
+        match = pattern.search(address)
+        if match:
+            marker = match.group(1).upper().replace('℅', 'C/O')
+            cleaned_address = pattern.sub('', address, count=1).strip(', ')
+            return cleaned_address, marker
+        return address, None
+    
+    
+    def normalize_attention_markers(self, address):
+        return re.sub(r'\b(attn|attention|c/o|℅)\b[:\s]*', lambda m: m.group(0).upper().replace('.', '').replace('℅', 'C/O'), address, flags=re.IGNORECASE)
 
     def extract_leading_addressee(self, address):
         if ',' in address:
             first_chunk = address.split(',')[0].strip()
-            if re.match(r'^\d', first_chunk) or len(first_chunk.split()) > 6:
+
+            # Reject if starts with known address/unit terms
+            if re.search(r'^\s*(APT|UNIT|STE|SUITE|#|\d+)\b', first_chunk, re.IGNORECASE):
                 return None, address
+
+            # Reject if it contains common address words
             if re.search(r'\b(P\.?\s*O\.?\s*Box|Lot\s+\d+|Unit|Bldg|Suite|Ste|#|Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Place|Pl)\b', first_chunk, re.IGNORECASE):
                 return None, address
+
+            # Reject if it's very long and likely not a name
+            if len(first_chunk.split()) > 6:
+                return None, address
+
             cleaned_address = address.replace(first_chunk + ',', '', 1).strip()
             return first_chunk, cleaned_address
+
         return None, address
 
     def extract_misc_unit(self, address):
-        match = re.search(r'\b(Basement|Rear|Lower Level|Garage|Floor\s*\d+[A-Z]?)\b', address, re.IGNORECASE)
+        match = re.search(r'\b(Unit|Suite|Ste|Apt|#)\s*\d+[A-Za-z]?\b', address, re.IGNORECASE)
         if match:
             misc_unit = match.group(0).strip()
             cleaned_address = address.replace(misc_unit, '').strip(', ')
@@ -314,7 +357,8 @@ class AddressParser:
     def parse_single_address(self, address):
         try:
             city_cleaned = False
-            
+            address, attention_marker = self.extract_attention_marker_and_clean(address)
+
             addressee, address = self.extract_leading_addressee(address)
             po_box, address = self.extract_po_box(address)
             lot_block, address = self.extract_lot_block(address)
@@ -349,29 +393,34 @@ class AddressParser:
                 "City": tagged.get("PlaceName"),
                 "State": self.standardize_state_name(tagged.get("StateName")),
                 "Zip Code": tagged.get("ZipCode"),
-                "Country": "USA"
+                "Country": "USA",
+                "Attention Marker": attention_marker  # ← set it here
             }
 
-            # Extract attention marker and title-case addressee
-            result["Addressee"], result["Attention Marker"] = self.extract_attention_marker(result["Addressee"])
+
+            
+            if not result["Street Name"] or not result["City"] or not result["State"]:
+                result["Flag"] = "Not a valid address"
+                return result
+
+            #result["Addressee"], result["Attention Marker"] = self.extract_attention_marker(result["Addressee"])
             if result["Addressee"]:
                 result["Addressee"] = result["Addressee"].title()
-                
+
             if result["City"]:
                 result["City"] = result["City"].title()
             if result["State"]:
                 result["State"] = result["State"].upper()
-            # Fix street casing
+
             if result["Street Name"]:
                 result["Street Name"] = result["Street Name"].title()
-            # Fix directional casing (after title())
+
             for full, abbr in DIRECTIONAL_ABBREVIATIONS.items():
                 if abbr.title() in result["Street Name"]:
                     result["Street Name"] = re.sub(rf"\b{abbr.title()}\b", abbr, result["Street Name"])
 
-            result["Addressee"], result["Attention Marker"] = self.extract_attention_marker(result["Addressee"])
+            #result["Addressee"], result["Attention Marker"] = self.extract_attention_marker(result["Addressee"])
 
-           # Fallback if city or state is missing
             if not result["City"] or not result["State"]:
                 tokens = re.split(r'\s+', address)
                 fallback_city, fallback_state = self.fallback_city_state_lookup(tokens)
@@ -382,8 +431,8 @@ class AddressParser:
                     result["State"] = fallback_state
 
             result["Normalized Address"] = self.construct_normalized_address(result)
-            
-            # ✅ Smart Index lookup + fallback
+
+            # Smart Index lookup + fallback
             smart_index = None
             if self.city_state_index_df is not None:
                 city = result.get("City")
@@ -408,7 +457,7 @@ class AddressParser:
                                 candidate = " ".join(tokens[i:i+window_size])
                                 if candidate in possible_cities:
                                     result["City"] = candidate.title()
-                                    city_cleaned = True  #  Set flag that city was cleaned
+                                    city_cleaned = True  # Set flag that city was cleaned
                                     match = self.city_state_index_df[
                                         (self.city_state_index_df['City'].str.lower() == candidate) &
                                         (self.city_state_index_df['State short'].str.upper() == state.upper())
@@ -417,10 +466,10 @@ class AddressParser:
                                         smart_index = match.iloc[0]['Smart Index']
                                         break
                             if smart_index:
-                                break         
-                        
+                                break
+
             result["Smart Index"] = smart_index
-            
+
             flag = None
 
             if not result.get("City") or not result.get("State"):
@@ -431,7 +480,7 @@ class AddressParser:
                 flag = "City/State not recognized"
 
             result["Flag"] = flag
-            
+
             return result
 
         except usaddress.RepeatedLabelError:
@@ -448,11 +497,39 @@ class AddressParser:
                 "Normalized Address": None
             }
 
+
     def parse_addresses(self, address_list):
         parsed_data = [self.parse_single_address(addr) for addr in address_list]
         df_parsed = pd.DataFrame(parsed_data)
         df_parsed.insert(0, "Original Address", address_list)
         return df_parsed
+    
+
+def standardize_state_names_to_abbr_preserve_case(addresses, abbrev_map):
+    standardized = []
+    for address in addresses:
+        new_address = address
+        for full, abbr in abbrev_map.items():
+            # Match full state name as a word (case-insensitive)
+            pattern = re.compile(rf'\b{re.escape(full)}\b', flags=re.IGNORECASE)
+            new_address = pattern.sub(abbr, new_address)
+        standardized.append(new_address)
+    return standardized
+
+def insert_comma_before_state_preserve_case(addresses, abbrev_values):
+    updated_addresses = []
+    for address in addresses:
+        modified = False
+        for abbr in abbrev_values:
+            pattern = re.compile(rf'\b{abbr}\b', flags=re.IGNORECASE)
+            match = pattern.search(address)
+            if match:
+                start = match.start()
+                if start > 0 and address[start - 1] != ',':
+                    address = address[:start].rstrip() + ", " + address[start:]
+                break
+        updated_addresses.append(address)
+    return updated_addresses
 
 parser = AddressParser(
     usps_abbreviations=USPS_ABBREVIATIONS,
@@ -463,249 +540,53 @@ parser = AddressParser(
 addresses = [
     "ATTN: Acme Inc 500 Broadway Floor 3 Rear Manhattan NY 10012",
     "John Doe 789 Elm St Apt 12C Chicago IL 60614",
+    "111 West Avenue, Detroit Michigan",
     "jane smith 88 maple avenue suite 7a brooklyn ny",
     "200 Market Street 3B San Francisco CA",
     "1500 E South St SE Washington DC",
-    "999 Mystery Lane Ste 1 Atlantis FL"
+    "999 Mystery Lane Ste 1 Atlantis FL",
+    "1234 Jasmine drive, Indianapolis Indiana", 
+    "I want Pizza for dinner"
 ]
 
-df_results = parser.parse_addresses(addresses)
+addresses_challenging = [
+    "ATTN: John Smith 4567 W Maple St Apt 3B Santa Monica CA 90401",
+    "PO Box 8675 12th Ave NW Seattle WA 98117",
+    " Brandy Johnson 124 West Avenue Detroit michigan",
+    "123 Elm St, Ste 45, Building 2 Northville MI, Attn: Susan M",
+    "1234 Unit 5B Old Oak Rd, Richmond, VA 23220",
+    "C/O Mr. Alan Brown, 5558 West 3rd St. Apt. 204, Los Angeles, CA 90036",
+    "APT 306 78 Spring Lane Westfield NJ 07090",
+    "John Doe, 1500 Park Blvd, Ste 1, San Juan,  Puerto Rico 78701",
+    "1532 Maple Ln #205, Suite 47, Woodlands TX, 77380"
+
+]
+
+df_results = parser.parse_addresses(addresses_challenging)
 df_results
 
 
+parser = AddressParser(
+    usps_abbreviations=USPS_ABBREVIATIONS,
+    state_abbreviations=US_STATE_ABBREVIATIONS,
+    city_state_index_df=df_city_state
+)
 
-addresses2 = [
-    "555 Grand Ave Los Angeles CA Rear",
-    "Acme Corp 1234 Broadway Floor 5 New York NY 10001",
-    "789 Pine St Apt 7C Westfield NJ",
-    "1600 E North St SE Columbia SC",
-    "Chicago Pizza Co, 808 Deep Dish Rd Chicago IL",
-    "421 Planet St Sector 9 Megacity XX"
+
+addresses_challenging = [
+    "ATTN: John Smith 4567 W Maple St Apt 3B Santa Monica CA 90401",
+    "PO Box 8675 12th Ave NW Seattle WA 98117",
+    " Brandy Johnson 124 West Avenue Detroit michigan",
+    "123 Elm St, Ste 45, Building 2 Northville MI",
+    "1234 Unit 5B Old Oak Rd, Richmand, VA 23220",
+    "C/O Mr. Alan Brown, 5558 West 3rd St. Apt. 204, Los Angeles, CA 90036",
+    "APT 306 78 Spring Lane Westfield NJ 07090",
+    "John Doe, 1500 Park Blvd, Ste 1, San Juan,  Puerto Rico 78701",
+    "1532 Maple Ln #205, Suite 47, Woodlands TX, 77380"
+
 ]
-df_results2 = parser.parse_addresses(addresses2)
+
+addresses_abbreviated = standardize_state_names_to_abbr_preserve_case(addresses_challenging, US_STATE_ABBREVIATIONS_2)
+addresses_ready_for_parse = insert_comma_before_state_preserve_case(addresses_abbreviated, US_STATE_ABBREVIATIONS_2.values())
+df_results2 = parser.parse_addresses(addresses_ready_for_parse)
 df_results2
-
-
-import re
-import pandas as pd
-
-class CanadianAddressParser:
-    def __init__(self, province_abbreviations, general_abbreviations):
-        self.province_abbreviations = {k.lower(): v for k, v in province_abbreviations.items()}
-        self.valid_abbreviations = set(self.province_abbreviations.values())
-        self.general_abbreviations = general_abbreviations
-
-    def extract_po_box(self, address):
-        match = re.search(r'\bP\.?\s*O\.?\s*Box\s*\d+\b', address, re.IGNORECASE)
-        if match:
-            po_box = match.group(0).strip()
-            cleaned_address = address.replace(po_box, '').strip(', ')
-            return po_box, cleaned_address
-        return None, address
-
-    def extract_lot_block(self, address):
-        match = re.search(r'(Lot\s+\d+\s+Block\s+\d+)', address, re.IGNORECASE)
-        if match:
-            lot_block = match.group(1).strip()
-            cleaned_address = address.replace(match.group(1), '').strip(', ')
-            return lot_block, cleaned_address
-        return None, address
-
-    def extract_misc_unit(self, address):
-        match = re.search(r'\b(Basement|Rear|Lower Level|Garage|Floor\s*\d+[A-Z]?)\b', address, re.IGNORECASE)
-        if match:
-            misc_unit = match.group(0).strip()
-            cleaned_address = address.replace(misc_unit, '').strip(', ')
-            return misc_unit, cleaned_address
-        return None, address
-
-    def extract_unit(self, address):
-        match = re.search(r'(Suite\s*\d+[A-Z]?|Apt\s*\d+[A-Z]?|Unit\s*\d+[A-Z]?|Box\s*\d+|RR\s*#?\s*\d+|Site\s*\d+)', address, re.IGNORECASE)
-        if match:
-            unit = match.group(0).strip()
-            cleaned = address.replace(match.group(0), '', 1).strip(', ')
-            return unit, cleaned
-        return None, address
-
-    def extract_attention_marker(self, addressee_text):
-        if not isinstance(addressee_text, str):
-            return None, None
-        marker_match = re.match(r'(?i)\b(ATTN|Attention|C\/O|\u2105)\b[:\s]*', addressee_text)
-        if marker_match:
-            marker = marker_match.group(1).upper()
-            cleaned_name = re.sub(r'(?i)\b(ATTN|Attention|C\/O|\u2105)\b[:\s]*', '', addressee_text).strip()
-            return cleaned_name, marker
-        return addressee_text.strip(), None
-
-    def extract_leading_addressee(self, address):
-        if ',' in address:
-            first_chunk = address.split(',')[0].strip()
-            if re.match(r'^\d', first_chunk) or len(first_chunk.split()) > 6:
-                return None, address
-            if re.search(r'\b(Box\s*\d+|Lot\s+\d+|Unit|Bldg|Suite|Ste|#|Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Place|Pl)\b', first_chunk, re.IGNORECASE):
-                return None, address
-            cleaned_address = address.replace(first_chunk + ',', '', 1).strip()
-            return first_chunk, cleaned_address
-        return None, address
-
-    def extract_postal_code(self, address):
-        match = re.search(r'[A-Z]\d[A-Z]\s?\d[A-Z]\d', address, re.IGNORECASE)
-        if match:
-            postal_code = match.group(0).upper()
-            cleaned_address = address.replace(postal_code, '').strip(', ')
-            return postal_code, cleaned_address
-        return None, address
-
-    def standardize_province(self, province):
-        if not isinstance(province, str):
-            return province
-        prov_clean = province.strip().lower()
-        return self.province_abbreviations.get(prov_clean, province.upper())
-
-    def apply_abbreviations(self, text, abbr_dict):
-        if not isinstance(text, str):
-            return text
-        words = re.split(r'(\W+)', text)  # Keep punctuation
-        standardized_words = []
-        for word in words:
-            upper_clean = word.strip().upper()
-            if upper_clean in abbr_dict:
-                standardized_words.append(abbr_dict[upper_clean])
-            else:
-                standardized_words.append(word)
-        return ''.join(standardized_words).strip()
-
-    def construct_normalized_address(self, result):
-        lines = []
-
-        # First line: attention/addressee
-        name_parts = []
-        if result.get("Attention Marker"):
-            name_parts.append(result["Attention Marker"])
-        if result.get("Addressee"):
-            name_parts.append(result["Addressee"])
-        if name_parts:
-            lines.append(' '.join(name_parts))
-
-        # Second line: street + unit
-        street_line = []
-        if result.get("Street Number"):
-            street_line.append(result["Street Number"])
-        if result.get("Street Name"):
-            street_line.append(result["Street Name"])
-        if street_line:
-            street_line_str = ' '.join(street_line)
-            if result.get("Unit"):
-                street_line_str += f", {result['Unit']}"
-            lines.append(street_line_str)
-
-        # Third line: city, province + postal
-        location_line = []
-        if result.get("City"):
-            location_line.append(result["City"])
-        if result.get("Province"):
-            location_line.append(result["Province"])
-        if result.get("Postal Code"):
-            location_line.append(result["Postal Code"])
-        if location_line:
-            lines.append(', '.join(location_line))
-
-        # Final line: country
-        if result.get("Country"):
-            lines.append(result["Country"])
-
-        return ', '.join(lines)
-
-    def parse_single_address(self, address):
-        try:
-            addressee, address = self.extract_leading_addressee(address)
-            po_box, address = self.extract_po_box(address)
-            lot_block, address = self.extract_lot_block(address)
-            misc_unit, address = self.extract_misc_unit(address)
-            postal_code, address = self.extract_postal_code(address)
-            unit, address = self.extract_unit(address)
-
-            parts = [p.strip() for p in address.split(',') if p.strip()]
-
-            result = {
-                "Addressee": addressee,
-                "Street Number": None,
-                "Street Name": None,
-                "Unit": po_box or lot_block or unit or misc_unit,
-                "City": None,
-                "Province": None,
-                "Postal Code": postal_code,
-                "Country": "Canada"
-            }
-
-            # Extract street number and name
-            if parts:
-                street_parts = parts[0].split()
-                if street_parts and re.match(r'^\d', street_parts[0]):
-                    result["Street Number"] = street_parts[0]
-                    result["Street Name"] = ' '.join(street_parts[1:])
-                else:
-                    result["Street Name"] = parts[0]
-
-            # Find province
-            for part in parts:
-                words = part.split()
-                for word in words:
-                    lw = word.lower().strip(', ')
-                    uw = word.upper().strip(', ')
-                    if lw in self.province_abbreviations:
-                        result["Province"] = self.province_abbreviations[lw]
-                        break
-                    elif uw in self.valid_abbreviations:
-                        result["Province"] = uw
-                        break
-                if result["Province"]:
-                    break
-
-            # Find city: skip province & postal, ignore street or unit duplicates
-            for part in parts:
-                if result["Province"] and result["Province"] in part:
-                    continue
-                if postal_code and postal_code in part:
-                    continue
-                if result["Street Name"] and result["Street Name"] in part:
-                    continue
-                if result["Unit"] and result["Unit"] in part:
-                    continue
-                result["City"] = part
-                break
-
-            # Final cleanups: abbreviate street and unit
-            if result["Street Name"]:
-                result["Street Name"] = self.apply_abbreviations(result["Street Name"], self.general_abbreviations)
-            if result["Unit"]:
-                result["Unit"] = self.apply_abbreviations(result["Unit"], self.general_abbreviations)
-
-            # Extract attention marker from addressee
-            result["Addressee"], result["Attention Marker"] = self.extract_attention_marker(result["Addressee"])
-
-            # Construct normalized address
-            result["Normalized Address"] = self.construct_normalized_address(result)
-            return result
-
-        except Exception as e:
-            print(f"Error parsing address: {address}\n{e}")
-            return {
-                "Addressee": None,
-                "Street Number": None,
-                "Street Name": None,
-                "Unit": None,
-                "City": None,
-                "Province": None,
-                "Postal Code": None,
-                "Country": "Canada",
-                "Attention Marker": None,
-                "Normalized Address": None
-            }
-
-    def parse_addresses(self, address_list):
-        parsed_data = [self.parse_single_address(addr) for addr in address_list]
-        df_parsed = pd.DataFrame(parsed_data)
-        df_parsed.insert(0, "Original Address", address_list)
-        return df_parsed
-
