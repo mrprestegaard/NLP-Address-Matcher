@@ -1,70 +1,105 @@
-# NLP-Address-Matcher
+# US Address Parser
 
-## Overview (still in testing--this is not a working product yet!!)
-NLP-Address-Matcher is (hopefully) going to be a Python-based tool designed to standardize and parse address data efficiently. It extracts relevant components from raw, unstructured address inputs and prepares them for automated client matching and validation. The project leverages a combination of regex-based transformations, predefined mappings (USPS standardizations), and structured parsing techniques to improve address normalization and matching accuracy.
+This Python project is a US address parser that helps with the extraction, standardization, and matching of U.S. addresses. It uses various techniques like abbreviation standardization and city/state lookups to ensure accurate address parsing. The parser can handle a wide variety of address formats, including those with minor errors or missing information.
 
 ## Features
-- **Standardizes Address Components:** Converts common variations and abbreviations into a consistent format.
-- **Unit Extraction & Normalization:** Identifies unit designations (e.g., "Suite 300", "Apt 4B") and standardizes them.
-- **Structured Address Parsing:** Breaks down addresses into key components such as street number, street name, city, state, and ZIP code.
-- **Error Handling for Messy Inputs:** Detects and manages ambiguous or misformatted address entries.
-- **Future Scalability:** Designed to integrate machine learning models (BERT, Sequence-to-Sequence, fuzzy matching) for enhanced address validation and comparison.
+
+- Extracts and parses various address components such as:
+  - Addressee
+  - Street number
+  - Street name
+  - Unit
+  - City
+  - State
+  - Zip code
+  - Country
+- Standardizes address abbreviations like:
+  - "St" → "Street"
+  - "Ave" → "Avenue"
+  - "Dr" → "Drive"
+- Handles **city/state matching** with smart indexing for quick lookups.
+- Identifies **missing city/state** information and flags addresses that need more information.
+- Can handle edge cases like attention markers (`ATTN:`, `C/O`) and unit identifiers (e.g., **Apt 12**, **Ste 5**).
 
 ## Installation
-To use NLP-Address-Matcher in your Python environment, clone this repository and install required dependencies:
+
+### Prerequisites
+Before you can use this parser, make sure you have the following libraries installed:
+
+- `pandas` for data manipulation.
+- `usaddress` for address tagging and parsing.
+- `requests` for fetching city/state data from external sources (e.g., GitHub CSV).
+
+To install the required libraries, create a virtual environment and run:
 
 ```bash
-git clone https://github.com/mrprestegaard/NLP-Address-Matcher.git
-cd NLP-Address-Matcher
 pip install -r requirements.txt
 ```
 
+If you don’t have `requirements.txt`, you can manually install the dependencies:
+
+```bash
+pip install pandas usaddress requests
+```
+
 ## Usage
-To parse an address and extract key details, use the provided functions:
+
+### Importing the Address Parser
 
 ```python
-from address_matcher import parse_us_address
+from address_parser import AddressParser
+```
 
-address = "123 Main St Apt. 4B, New York, NY 10001"
-parsed_result = parse_us_address(address)
+### Example of Parsing a Single Address
+
+```python
+# Initialize the parser with necessary dictionaries and city/state data
+parser = AddressParser(
+    usps_abbreviations=USPS_ABBREVIATIONS,
+    state_abbreviations=US_STATE_ABBREVIATIONS,
+    city_state_index_df=df_city_state
+)
+
+address = "ATTN: Mark Twain, 123 Main Street Suite 450 Manhattan NY 10012"
+
+# Parse the address
+parsed_result = parser.parse_single_address(address)
+
 print(parsed_result)
 ```
 
-**Output Example:**
-```json
-{
-    "Addressee": null,
-    "Street Number": "123",
-    "Street Name": "Main St",
-    "Unit": "Apt 4B",
-    "City": "New York",
-    "State": "NY",
-    "Zip Code": "10001",
-    "Country": "USA"
-}
+### Example of Parsing Multiple Addresses
+
+```python
+addresses = [
+    "ATTN: Acme Inc 500 Broadway Floor 3 Rear Manhattan NY 10012",
+    "John Doe 789 Elm St Apt 12C Chicago IL 60614",
+    "jane smith 88 maple avenue suite 7a brooklyn ny"
+]
+
+# Parse a list of addresses
+df_results = parser.parse_addresses(addresses)
+
+print(df_results[['Original Address', 'City', 'State', 'Smart Index', 'Normalized Address', 'Flag']])
 ```
 
-## Applications
-- **Client Record Matching:** Standardizing and comparing customer addresses to identify duplicates or inconsistencies.
-- **Database Cleanup:** Ensuring address consistency across structured databases.
-- **Logistics & Shipping:** Improving address validation for package delivery systems.
-- **Fraud Detection:** Enhancing identity verification by cross-referencing address data.
+## Data Source
 
-## Dependencies
-This project makes use of the [`usaddress`](https://github.com/datamade/usaddress) package for structured address parsing. `usaddress` is a probabilistic, rule-based parser for extracting address components from unstructured text. It plays a critical role in identifying and labeling address parts accurately.
+This parser uses a city/state dataset retrieved from GitHub, which provides information about U.S. cities, states, and counties. The CSV is loaded dynamically from:
 
-## Roadmap
-- Implement machine learning-based address normalization and entity recognition.
-- Enhance fuzzy matching for more accurate historical record comparisons.
-- Expand support for international addresses.
-- Optimize processing speed for bulk address handling.
+- [U.S. Cities and States Dataset](https://github.com/grammakov/USA-cities-and-states)
 
-## License
-This project is licensed under the MIT License - see the `LICENSE` file for details.
+## How It Works
+
+1. **Abbreviation Handling**: The parser normalizes common address abbreviations (e.g., "Ave" to "Avenue") using a dictionary of abbreviations.
+2. **Address Parsing**: The script breaks the address down into components using **usaddress**, which tags different parts of the address (e.g., street name, city, state).
+3. **City/State Lookup**: A lookup is performed using a **smart index** to ensure that the city and state are recognized correctly. If not, it flags the address as needing more information.
+4. **Normalization**: The parser standardizes the case of components like the city name and street name (e.g., "brooklyn" to "Brooklyn").
 
 ## Contributing
-Contributions are welcome! Please open an issue or submit a pull request for bug fixes, feature requests, or enhancements.
 
-## Contact
-For questions or collaboration inquiries, please reach out via GitHub Issues.
+Feel free to fork this repository, open issues, and submit pull requests. Improvements and additional features are welcome!
 
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
