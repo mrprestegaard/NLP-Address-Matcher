@@ -357,9 +357,16 @@ class AddressParser:
     def parse_single_address(self, address):
         try:
             city_cleaned = False
-            address, attention_marker = self.extract_attention_marker_and_clean(address)
+            # First, extract addressee from the first chunk
+            addressee, remaining = self.extract_leading_addressee(address)
 
-            addressee, address = self.extract_leading_addressee(address)
+            # Now extract attention marker from that addressee (if present)
+            if addressee:
+                addressee, attention_marker = self.extract_attention_marker_and_clean(addressee)
+            else:
+                attention_marker = None
+
+            address = remaining
             po_box, address = self.extract_po_box(address)
             lot_block, address = self.extract_lot_block(address)
             misc_unit, address = self.extract_misc_unit(address)
@@ -590,3 +597,37 @@ addresses_abbreviated = standardize_state_names_to_abbr_preserve_case(addresses_
 addresses_ready_for_parse = insert_comma_before_state_preserve_case(addresses_abbreviated, US_STATE_ABBREVIATIONS_2.values())
 df_results2 = parser.parse_addresses(addresses_ready_for_parse)
 df_results2
+
+
+addresses_challenging = [
+    "ATTN: John Smith 4567 W Maple St Apt 3B Santa Monica CA 90401",
+    "PO Box 8675 12th Ave NW Seattle WA 98117",
+    "Brandy Johnson 124 West Avenue Detroit Michigan",
+    "123 Elm St, Ste 45, Building 2 Northville MI",
+    "1234 Unit 5B Old Oak Rd, Richmond VA 23220",
+    "C/O Mr. Alan Brown, 5558 West 3rd St. Apt. 204, Los Angeles CA 90036",
+    "APT 306 78 Spring Lane Westfield NJ 07090",
+    "John Doe, 1500 Park Blvd, Ste 1, San Juan Puerto Rico 78701",
+    "1532 Maple Ln #205, Suite 47, Woodlands TX 77380",
+    "ATTN: Finance Dept 89 Corporate Center Dr, Philadelphia PA 17011",
+    "C/O Sarah Green, 123 Innovation Way, Suite 400, Boston MA 02134",
+    "PO Box 32001 65 Industrial Park Way Newark NJ 07105",
+    "Robert Bell 78 Eighth Ave Apt 9C New York NY 10011",
+    "789 Lakeside Dr., Bldg 3, Lot 7, Orlando FL 32801",
+    "Ms. Angela Lee 900 Mission Blvd Apt 12A San Francisco California 94110",
+    "C/O Procurement Team, 2222 Harbor Blvd Ste 1100 Costa Mesa CA 92627",
+    "ATTN: Billing 555 Market St Ste 1000 San Francisco CA 94105",
+    "Delivery Dept 321 Country Club Dr Bldg 4R Arlington Texas 76010",
+    "P.O. Box 90909 123 Legal Lane Jackson MS 39201",
+    "Jonathan King, 425 Digital Ave, Ste 300, Miami, FL 33130, USA"
+]
+
+
+addresses_abbreviated = standardize_state_names_to_abbr_preserve_case(addresses_challenging, US_STATE_ABBREVIATIONS_2)
+addresses_ready_for_parse = insert_comma_before_state_preserve_case(addresses_abbreviated, US_STATE_ABBREVIATIONS_2.values())
+df_results3 = parser.parse_addresses(addresses_ready_for_parse)
+
+
+flagged = df_results3[df_results3["Flag"].notna()]
+print(flagged[["Original Address", "Flag"]].to_string(index=False))
+
