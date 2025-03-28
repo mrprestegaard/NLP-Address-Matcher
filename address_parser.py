@@ -1,3 +1,5 @@
+pip install usaddress pandas requests
+
 # Grouped dictionaries for better organization
 STREET_ABBREVIATIONS = {
     "alley": "Aly", "annex": "Anx", " arcade": "Arc", "avenue": "Ave", "bayou": "Byu",
@@ -122,6 +124,60 @@ CANADIAN_ABBREVIATIONS = {
     **ORDINAL_ABBREVIATIONS
 }
 
+import pandas as pd
+import requests
+from io import StringIO
+
+# Load CSV from GitHub
+url = "https://raw.githubusercontent.com/grammakov/USA-cities-and-states/refs/heads/master/us_cities_states_counties.csv"
+response = requests.get(url)
+df = pd.read_csv(StringIO(response.text), delimiter='|')
+
+# Clean up whitespace and column names
+df.columns = [col.strip() for col in df.columns]
+df['City'] = df['City'].str.strip()
+df['State short'] = df['State short'].str.strip()
+
+# Define NYC boroughs as their own "cities"
+nyc_boroughs = [
+    {"City": "Manhattan", "State short": "NY", "State full": "New York", "Country": "USA"},
+    {"City": "Brooklyn", "State short": "NY", "State full": "New York", "Country": "USA"},
+    {"City": "Queens", "State short": "NY", "State full": "New York", "Country": "USA"},
+    {"City": "Bronx", "State short": "NY", "State full": "New York", "Country": "USA"},
+    {"City": "Staten Island", "State short": "NY", "State full": "New York", "Country": "USA"}
+]
+
+# Convert to DataFrame
+df_boroughs = pd.DataFrame(nyc_boroughs)
+
+# Append to your city/state DataFrame
+df_city_state = pd.concat([df_city_state, df_boroughs], ignore_index=True)
+
+# Drop duplicates again in case any are already present
+df_city_state = df_city_state.drop_duplicates(subset=["City", "State short"]).reset_index(drop=True)
+
+
+# Map state codes
+state_codes = {abbr: f"{i+1:02d}" for i, abbr in enumerate(sorted(df_city_state['State short'].unique()))}
+df_city_state = df_city_state.sort_values(by=['State short', 'City']).reset_index(drop=True)
+
+# Generate Smart Index
+smart_indices = []
+current_state = None
+counter = 0
+
+for _, row in df_city_state.iterrows():
+    state = row['State short']
+    if state != current_state:
+        current_state = state
+        counter = 1
+    else:
+        counter += 1
+    smart_index = f"{state_codes[state]}{counter:04d}"
+    smart_indices.append(smart_index)
+
+df_city_state['Smart Index'] = smart_indices
+
 
 
 import re
@@ -129,9 +185,10 @@ import pandas as pd
 import usaddress
 
 class AddressParser:
-    def __init__(self, usps_abbreviations, state_abbreviations):
+    def __init__(self, usps_abbreviations, state_abbreviations, city_state_index_df=None):
         self.usps_abbreviations = usps_abbreviations
         self.state_abbreviations = {k.upper(): v for k, v in state_abbreviations.items()}
+        self.city_state_index_df = city_state_index_df  # your df_city_state
 
     def extract_po_box(self, address):
         match = re.search(r'\bP\.?\s*O\.?\s*Box\s*\d+\b', address, re.IGNORECASE)
@@ -211,6 +268,7 @@ class AddressParser:
             else:
                 standardized_words.append(word)
         return ''.join(standardized_words)
+    
 
     def construct_normalized_address(self, result):
         lines = []
@@ -255,6 +313,8 @@ class AddressParser:
 
     def parse_single_address(self, address):
         try:
+            city_cleaned = False
+            
             addressee, address = self.extract_leading_addressee(address)
             po_box, address = self.extract_po_box(address)
             lot_block, address = self.extract_lot_block(address)
@@ -292,9 +352,86 @@ class AddressParser:
                 "Country": "USA"
             }
 
+            # Extract attention marker and title-case addressee
+            result["Addressee"], result["Attention Marker"] = self.extract_attention_marker(result["Addressee"])
+            if result["Addressee"]:
+                result["Addressee"] = result["Addressee"].title()
+                
+            if result["City"]:
+                result["City"] = result["City"].title()
+            if result["State"]:
+                result["State"] = result["State"].upper()
+            # Fix street casing
+            if result["Street Name"]:
+                result["Street Name"] = result["Street Name"].title()
+            # Fix directional casing (after title())
+            for full, abbr in DIRECTIONAL_ABBREVIATIONS.items():
+                if abbr.title() in result["Street Name"]:
+                    result["Street Name"] = re.sub(rf"\b{abbr.title()}\b", abbr, result["Street Name"])
+
             result["Addressee"], result["Attention Marker"] = self.extract_attention_marker(result["Addressee"])
 
+           # Fallback if city or state is missing
+            if not result["City"] or not result["State"]:
+                tokens = re.split(r'\s+', address)
+                fallback_city, fallback_state = self.fallback_city_state_lookup(tokens)
+
+                if fallback_city and not result["City"]:
+                    result["City"] = fallback_city
+                if fallback_state and not result["State"]:
+                    result["State"] = fallback_state
+
             result["Normalized Address"] = self.construct_normalized_address(result)
+            
+            # ✅ Smart Index lookup + fallback
+            smart_index = None
+            if self.city_state_index_df is not None:
+                city = result.get("City")
+                state = result.get("State")
+                if city and state:
+                    match = self.city_state_index_df[
+                        (self.city_state_index_df['City'].str.lower() == city.lower()) &
+                        (self.city_state_index_df['State short'].str.upper() == state.upper())
+                    ]
+                    if not match.empty:
+                        smart_index = match.iloc[0]['Smart Index']
+
+                    # Fallback: search for known city name within a messy city string
+                    if not smart_index:
+                        possible_cities = self.city_state_index_df[
+                            self.city_state_index_df['State short'].str.upper() == state.upper()
+                        ]['City'].str.lower().tolist()
+
+                        tokens = city.lower().split()
+                        for window_size in range(3, 0, -1):
+                            for i in range(len(tokens) - window_size + 1):
+                                candidate = " ".join(tokens[i:i+window_size])
+                                if candidate in possible_cities:
+                                    result["City"] = candidate.title()
+                                    city_cleaned = True  #  Set flag that city was cleaned
+                                    match = self.city_state_index_df[
+                                        (self.city_state_index_df['City'].str.lower() == candidate) &
+                                        (self.city_state_index_df['State short'].str.upper() == state.upper())
+                                    ]
+                                    if not match.empty:
+                                        smart_index = match.iloc[0]['Smart Index']
+                                        break
+                            if smart_index:
+                                break         
+                        
+            result["Smart Index"] = smart_index
+            
+            flag = None
+
+            if not result.get("City") or not result.get("State"):
+                flag = "City/State missing"
+            elif city_cleaned:
+                flag = "City cleaned"
+            elif not result.get("Smart Index"):
+                flag = "City/State not recognized"
+
+            result["Flag"] = flag
+            
             return result
 
         except usaddress.RepeatedLabelError:
@@ -317,9 +454,36 @@ class AddressParser:
         df_parsed.insert(0, "Original Address", address_list)
         return df_parsed
 
+parser = AddressParser(
+    usps_abbreviations=USPS_ABBREVIATIONS,
+    state_abbreviations=US_STATE_ABBREVIATIONS,
+    city_state_index_df=df_city_state
+)
+
+addresses = [
+    "ATTN: Acme Inc 500 Broadway Floor 3 Rear Manhattan NY 10012",
+    "John Doe 789 Elm St Apt 12C Chicago IL 60614",
+    "jane smith 88 maple avenue suite 7a brooklyn ny",
+    "200 Market Street 3B San Francisco CA",
+    "1500 E South St SE Washington DC",
+    "999 Mystery Lane Ste 1 Atlantis FL"
+]
+
+df_results = parser.parse_addresses(addresses)
+df_results
 
 
 
+addresses2 = [
+    "555 Grand Ave Los Angeles CA Rear",
+    "Acme Corp 1234 Broadway Floor 5 New York NY 10001",
+    "789 Pine St Apt 7C Westfield NJ",
+    "1600 E North St SE Columbia SC",
+    "Chicago Pizza Co, 808 Deep Dish Rd Chicago IL",
+    "421 Planet St Sector 9 Megacity XX"
+]
+df_results2 = parser.parse_addresses(addresses2)
+df_results2
 
 
 import re
@@ -544,30 +708,4 @@ class CanadianAddressParser:
         df_parsed = pd.DataFrame(parsed_data)
         df_parsed.insert(0, "Original Address", address_list)
         return df_parsed
-
-
-
-
-# Exmaple Usage 3/27/25
-
-
-
-sample_addresses = [
-    "ATTN: John Doe, 123 Main St Suite 200, Toronto, Ontario, M5J 2N1",
-    "Jane Smith, PO Box 456, Vancouver, BC, V6B 4N6",
-    "Lot 7 Block 12, 789 Elm Street, Saskatoon, SK, S7H 5K5",
-    "C/O Mike Jones, 234 Queen St Apt 3B, Ottawa ON K1P 1N2",
-    "Unit 10 999 Maple Avenue, Calgary AB T2P 3N4",
-    "Basement 55 Birchmount Road, Halifax, NS, B3J 2Y3"
-]
-
-#canadian_address_list = [
-#    "ATTN: Samuel Samuelson, PO Box 450, 4457 Blackhawk Dr, Alberta, Canada"
-#]
-
-canadian_parser = CanadianAddressParser(CANADIAN_PROVINCE_ABBREVIATIONS, CANADIAN_ABBREVIATIONS)
-df_canada = canadian_parser.parse_addresses(sample_addresses)
-df_canada
-
-
 
